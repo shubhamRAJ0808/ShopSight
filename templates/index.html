@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>ShopSight — Analytics & ML Forecasting</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<!-- SIDEBAR OVERLAY (mobile) -->
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+<!-- ══ SIDEBAR ══════════════════════════════════════════════ -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-mark">SS</div>
+    <div class="logo-text">
+      <span class="logo-title">{{ shop_name }}</span>
+      <span class="logo-sub">Sales & Forecasting</span>
+    </div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <button class="nav-item active" onclick="showPage('overview', this)">
+      <span class="nav-icon">▦</span>Overview
+    </button>
+    <button class="nav-item ml-nav" onclick="showPage('ml', this)">
+      <span class="nav-icon">🤖</span>ML Forecast
+    </button>
+    <button class="nav-item" onclick="showPage('filters', this)">
+      <span class="nav-icon">⚙</span>Filters & Analytics
+    </button>
+    <button class="nav-item" onclick="showPage('records', this)">
+      <span class="nav-icon">≡</span>Records
+    </button>
+    <button class="nav-item" onclick="showPage('add', this)">
+      <span class="nav-icon">＋</span>Add Sale
+    </button>
+    <a href="/export_csv" class="nav-item export-link">
+      <span class="nav-icon">↓</span>Export CSV
+    </a>
+  </nav>
+
+  <!-- User / Profile button -->
+  <div class="sidebar-user" onclick="openProfile()">
+    <div class="user-avatar" id="sidebarAvatar">{{ username[0].upper() }}</div>
+    <div class="user-info">
+      <span class="user-name" id="sidebarUsername">{{ username }}</span>
+      <span class="user-role">{{ role|capitalize }} · {{ shop_name }}</span>
+    </div>
+    <span class="user-chevron">›</span>
+  </div>
+
+  <div class="sidebar-footer">
+    <div class="live-dot"></div>
+    <span id="live-time-side"></span>
+  </div>
+</aside>
+
+<!-- ══ PROFILE MODAL ════════════════════════════════════════ -->
+<div class="modal-overlay" id="profileModal">
+  <div class="profile-modal">
+    <div class="profile-header">
+      <button class="profile-close" onclick="closeProfile()">✕</button>
+      <div class="profile-avatar-big" id="profileAvatarBig">{{ (profile.full_name or username)[0].upper() }}</div>
+      <div class="profile-name-big" id="profileFullname">{{ profile.full_name or username }}</div>
+      <span class="profile-role-badge">{{ role|capitalize }}</span>
+    </div>
+
+    <div class="profile-body">
+      <!-- Quick stats -->
+      <div class="profile-section-title">Dashboard Stats</div>
+      <div class="profile-stats">
+        <div class="pstat">
+          <div class="pstat-val">{{ total_orders }}</div>
+          <div class="pstat-label">Orders</div>
+        </div>
+        <div class="pstat">
+          <div class="pstat-val">{{ total_units }}</div>
+          <div class="pstat-label">Units</div>
+        </div>
+        <div class="pstat">
+          <div class="pstat-val">{{ all_products|length }}</div>
+          <div class="pstat-label">Products</div>
+        </div>
+      </div>
+
+      <!-- Appearance -->
+      <div class="profile-section-title">Appearance</div>
+      <div class="theme-toggle-row">
+        <span class="theme-label" id="themeLabel">🌙 Dark Mode</span>
+        <div class="toggle-switch on" id="themeToggle" onclick="toggleTheme()">
+          <div class="toggle-knob"></div>
+        </div>
+      </div>
+
+      <!-- Personal details — saved server-side, scoped to this user's own row.
+           (Previously written to a single shared browser localStorage key,
+           which is why every account on the same browser showed the same
+           values — that bug is fixed by making this a real form.) -->
+      <div class="profile-section-title">Personal Details</div>
+      <form method="POST" action="/profile/update">
+        <div class="profile-field">
+          <label>Username</label>
+          <input type="text" value="{{ username }}" readonly>
+        </div>
+        <div class="profile-field">
+          <label>Full Name</label>
+          <input type="text" name="full_name" placeholder="Enter your full name" value="{{ profile.full_name or '' }}">
+        </div>
+        <div class="profile-field">
+          <label>Email Address</label>
+          <input type="email" name="email" placeholder="Enter your email" value="{{ profile.email or '' }}">
+        </div>
+        <div class="profile-field">
+          <label>Department</label>
+          <input type="text" name="department" placeholder="e.g. Sales, Marketing" value="{{ profile.department or '' }}">
+        </div>
+        <div class="profile-field">
+          <label>Phone</label>
+          <input type="text" name="phone" placeholder="+91 00000 00000" value="{{ profile.phone or '' }}">
+        </div>
+        <div class="profile-field">
+          <label>Location</label>
+          <input type="text" name="location" placeholder="City, Country" value="{{ profile.location or '' }}">
+        </div>
+
+        <div class="profile-actions">
+          <button type="submit" class="btn-save-profile">💾 Save Changes</button>
+          <a href="/logout" class="btn-logout-profile">⏻ Logout</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ══ MAIN ═════════════════════════════════════════════════ -->
+<main class="main-content">
+
+  <!-- ── PAGE: OVERVIEW ──────────────────────────────────── -->
+  <div class="page active fade-in" id="page-overview">
+
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <button class="hamburger" onclick="toggleSidebar()" aria-label="Menu">
+          <span></span><span></span><span></span>
+        </button>
+        <div class="page-title">
+          <h1>Overview <span class="ai-chip">🤖 ML</span></h1>
+          <span class="page-sub">Sales KPIs &amp; Period Stats</span>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <button class="topbar-theme-btn" onclick="toggleTheme()" id="topbarThemeBtn">🌙 Dark</button>
+        <span class="live-badge"><span class="live-pulse"></span>LIVE</span>
+        <span id="live-time" class="topbar-time"></span>
+      </div>
+    </header>
+
+    <!-- KPI Cards -->
+    <section class="kpi-grid" id="kpi">
+      <div class="kpi-card kpi-blue">
+        <div class="kpi-bg-icon">₹</div>
+        <div class="kpi-top">
+          <span class="kpi-label">Total Revenue</span>
+          {% if growth_rate > 0 %}
+            <span class="kpi-badge badge-up">↑ {{ growth_rate }}% avg growth</span>
+          {% elif growth_rate < 0 %}
+            <span class="kpi-badge badge-down">↓ {{ growth_rate|abs }}% avg</span>
+          {% endif %}
+        </div>
+        <div class="kpi-value">₹{{ "{:,.0f}".format(total_revenue) }}</div>
+        <div class="kpi-sub">Avg ₹{{ "{:,.0f}".format(avg_order_val) }} / order</div>
+      </div>
+
+      <div class="kpi-card kpi-green">
+        <div class="kpi-bg-icon">📦</div>
+        <div class="kpi-top">
+          <span class="kpi-label">Units Sold</span>
+          <span class="kpi-badge badge-neutral">{{ total_orders }} orders</span>
+        </div>
+        <div class="kpi-value">{{ total_units }}</div>
+        <div class="kpi-sub">Total units across all products</div>
+      </div>
+
+      <div class="kpi-card kpi-purple">
+        <div class="kpi-bg-icon">📅</div>
+        <div class="kpi-top">
+          <span class="kpi-label">This Month</span>
+          {% if month_growth is not none %}
+            {% if month_growth >= 0 %}
+              <span class="kpi-badge badge-up">↑ {{ month_growth }}% vs last</span>
+            {% else %}
+              <span class="kpi-badge badge-down">↓ {{ month_growth|abs }}% vs last</span>
+            {% endif %}
+          {% endif %}
+        </div>
+        <div class="kpi-value">₹{{ "{:,.0f}".format(month_rev) }}</div>
+        <div class="kpi-sub">Last month: ₹{{ "{:,.0f}".format(prev_month_rev) }}</div>
+      </div>
+
+      <div class="kpi-card kpi-orange">
+        <div class="kpi-bg-icon">⭐</div>
+        <div class="kpi-top">
+          <span class="kpi-label">Top This Month</span>
+          <span class="kpi-badge badge-gold">🏆 #1</span>
+        </div>
+        <div class="kpi-value kpi-sm">{{ top_month_product }}</div>
+        <div class="kpi-sub">₹{{ "{:,.0f}".format(top_month_rev) }} revenue</div>
+      </div>
+    </section>
+
+    <!-- Period stats -->
+    <section class="period-row">
+      <div class="period-card">
+        <span class="period-label">Today</span>
+        <span class="period-val">₹{{ "{:,.0f}".format(today_rev) }}</span>
+      </div>
+      <div class="period-card">
+        <span class="period-label">Yesterday</span>
+        <span class="period-val">₹{{ "{:,.0f}".format(yesterday_rev) }}</span>
+      </div>
+      <div class="period-card">
+        <span class="period-label">Past 7 Days</span>
+        <span class="period-val">₹{{ "{:,.0f}".format(week_rev) }}</span>
+      </div>
+      <div class="period-card">
+        <span class="period-label">This Month</span>
+        <span class="period-val">₹{{ "{:,.0f}".format(month_rev) }}</span>
+      </div>
+      <div class="period-card period-highlight">
+        <span class="period-label">🏆 Best Product (Month)</span>
+        <span class="period-val">{{ top_month_product }}</span>
+      </div>
+    </section>
+
+    <!-- Mini charts on overview -->
+    <section class="charts-grid" style="padding-top:16px;">
+      <div class="chart-card">
+        <div class="chart-header">
+          <div>
+            <h3>Revenue by Product</h3>
+            <p class="chart-desc">Filter by time period</p>
+          </div>
+          <div class="period-tabs">
+            <button class="tab-btn active" data-period="all">All</button>
+            <button class="tab-btn" data-period="month">Month</button>
+            <button class="tab-btn" data-period="week">Week</button>
+            <button class="tab-btn" data-period="today">Today</button>
+          </div>
+        </div>
+        <div class="chart-canvas-wrap"><canvas id="revenueChart"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-header">
+          <div>
+            <h3>Units by Product</h3>
+            <p class="chart-desc">Share of total units sold</p>
+          </div>
+          <span class="chart-tag">Doughnut</span>
+        </div>
+        <div class="chart-canvas-wrap"><canvas id="doughnutChart"></canvas></div>
+      </div>
+    </section>
+
+  </div><!-- /page-overview -->
+
+  <!-- ── PAGE: ML FORECAST ─────────────────────────────────── -->
+  <div class="page fade-in" id="page-ml">
+
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <button class="hamburger" onclick="toggleSidebar()">
+          <span></span><span></span><span></span>
+        </button>
+        <div class="page-title">
+          <h1>ML Forecast <span class="ai-chip">🤖 AI</span></h1>
+          <span class="page-sub">Seasonality-aware Regression &amp; Moving Average models</span>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <button class="topbar-theme-btn" onclick="toggleTheme()">🌙 Dark</button>
+        <span class="live-badge"><span class="live-pulse"></span>LIVE</span>
+        <span class="topbar-time" id="live-time-ml"></span>
+      </div>
+    </header>
+
+    <section class="ml-section" id="ml" style="margin-top:16px;">
+      <div class="ml-header">
+        <div>
+          <h2>🤖 Machine Learning Forecast</h2>
+          <p>Regression (trend + seasonality) &amp; Moving Average models trained on your historical data</p>
+        </div>
+        <div class="ml-accuracy">
+          <span class="acc-label">Model Accuracy (R²)</span>
+          <span class="acc-value">{{ model_accuracy }}%</span>
+          <div class="acc-bar"><div class="acc-fill" style="width:{{ model_accuracy }}%"></div></div>
+        </div>
+      </div>
+
+      <div class="ml-cards">
+        <div class="ml-kpi-card ml-lr">
+          <div class="ml-kpi-icon">📈</div>
+          <div>
+            <div class="ml-kpi-label">Next Month Forecast</div>
+            <div class="ml-kpi-subtitle">Regression (trend+season)</div>
+            <div class="ml-kpi-value">₹{{ "{:,.0f}".format(next_lr) }}</div>
+          </div>
+        </div>
+        <div class="ml-kpi-card ml-ma">
+          <div class="ml-kpi-icon">〰</div>
+          <div>
+            <div class="ml-kpi-label">Next Month Forecast</div>
+            <div class="ml-kpi-subtitle">Moving Average (3-mo)</div>
+            <div class="ml-kpi-value">₹{{ "{:,.0f}".format(next_ma) }}</div>
+          </div>
+        </div>
+        <div class="ml-kpi-card ml-growth">
+          <div class="ml-kpi-icon">🚀</div>
+          <div>
+            <div class="ml-kpi-label">Avg Monthly Growth</div>
+            <div class="ml-kpi-subtitle">Month-on-month trend</div>
+            <div class="ml-kpi-value {% if growth_rate >= 0 %}val-up{% else %}val-down{% endif %}">
+              {% if growth_rate >= 0 %}+{% endif %}{{ growth_rate }}%
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chart-card" style="margin-top:0;">
+        <div class="chart-header">
+          <div>
+            <h3>Revenue Forecast — Next 6 Months</h3>
+            <p class="chart-desc">Historical data + Linear Regression + Moving Average predictions</p>
+          </div>
+          <div class="chart-legend-custom">
+            <span class="leg-dot" style="background:#4f8ef7"></span>Actual
+            <span class="leg-dot" style="background:#22d3a0"></span>LR Forecast
+            <span class="leg-dot" style="background:#a78bfa"></span>MA Forecast
+          </div>
+        </div>
+        <div class="chart-canvas-wrap chart-canvas-tall"><canvas id="mlForecastChart"></canvas></div>
+      </div>
+    </section>
+
+  </div><!-- /page-ml -->
+
+  <!-- ── PAGE: FILTERS & ANALYTICS ─────────────────────────── -->
+  <div class="page fade-in" id="page-filters">
+
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <button class="hamburger" onclick="toggleSidebar()">
+          <span></span><span></span><span></span>
+        </button>
+        <div class="page-title">
+          <h1>Filters &amp; Analytics</h1>
+          <span class="page-sub">Drill down into your data</span>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <button class="topbar-theme-btn" onclick="toggleTheme()">🌙 Dark</button>
+        <span class="live-badge"><span class="live-pulse"></span>LIVE</span>
+      </div>
+    </header>
+
+    <!-- Filters -->
+    <section class="filter-section" style="padding-top:16px;">
+      <div class="filter-card">
+        <div class="filter-header">
+          <h3>⚙ Data Filters</h3>
+          {% if f_product or f_date_from or f_date_to or f_month %}
+            <a href="/" class="btn-clear-filter">✕ Clear Filters</a>
+          {% endif %}
+        </div>
+        <form method="GET" action="/" class="filter-form">
+          <div class="filter-group">
+            <label>Product</label>
+            <select name="product">
+              <option value="">All Products</option>
+              {% for p in all_products %}
+                <option value="{{ p }}" {% if f_product == p %}selected{% endif %}>{{ p }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>Month</label>
+            <select name="month">
+              <option value="">All Months</option>
+              {% for m in all_months %}
+                <option value="{{ m }}" {% if f_month == m %}selected{% endif %}>{{ m }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>Date From</label>
+            <input type="date" name="date_from" value="{{ f_date_from }}">
+          </div>
+          <div class="filter-group">
+            <label>Date To</label>
+            <input type="date" name="date_to" value="{{ f_date_to }}">
+          </div>
+          <div class="filter-group filter-btn-group">
+            <label>&nbsp;</label>
+            <button type="submit" class="btn-primary">Apply Filters</button>
+          </div>
+        </form>
+        {% if f_product or f_date_from or f_date_to or f_month %}
+        <div class="filter-active-info">
+          🔍 Filtered:
+          {% if f_product %}<span class="filter-tag">Product: {{ f_product }}</span>{% endif %}
+          {% if f_month %}<span class="filter-tag">Month: {{ f_month }}</span>{% endif %}
+          {% if f_date_from %}<span class="filter-tag">From: {{ f_date_from }}</span>{% endif %}
+          {% if f_date_to %}<span class="filter-tag">To: {{ f_date_to }}</span>{% endif %}
+          <span class="filter-tag">{{ sales|length }} records</span>
+        </div>
+        {% endif %}
+      </div>
+    </section>
+
+    <!-- Charts -->
+    <section class="charts-grid">
+      <div class="chart-card">
+        <div class="chart-header">
+          <div>
+            <h3>Revenue by Product</h3>
+            <p class="chart-desc">Filter by time period</p>
+          </div>
+          <div class="period-tabs">
+            <button class="tab-btn active" data-period="all">All</button>
+            <button class="tab-btn" data-period="month">Month</button>
+            <button class="tab-btn" data-period="week">Week</button>
+            <button class="tab-btn" data-period="today">Today</button>
+            <button class="tab-btn" data-period="yesterday">Yesterday</button>
+          </div>
+        </div>
+        <div class="chart-canvas-wrap"><canvas id="revenueChart2"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-header">
+          <div><h3>Units by Product</h3><p class="chart-desc">Share of total units</p></div>
+          <span class="chart-tag">Doughnut</span>
+        </div>
+        <div class="chart-canvas-wrap"><canvas id="doughnutChart2"></canvas></div>
+      </div>
+    </section>
+
+  </div><!-- /page-filters -->
+
+  <!-- ── PAGE: RECORDS ─────────────────────────────────────── -->
+  <div class="page fade-in" id="page-records">
+
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <button class="hamburger" onclick="toggleSidebar()">
+          <span></span><span></span><span></span>
+        </button>
+        <div class="page-title">
+          <h1>Sales Records</h1>
+          <span class="page-sub">{{ sales|length }} records found</span>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <button class="topbar-theme-btn" onclick="toggleTheme()">🌙 Dark</button>
+        <a href="/export_csv" class="btn-export">↓ Export CSV</a>
+      </div>
+    </header>
+
+    <section class="table-section" style="padding-top:20px;">
+      <div class="table-toolbar">
+        <h3>📋 Sales Records <span class="record-count">{{ sales|length }} records</span></h3>
+        <div class="toolbar-right">
+          <input type="text" id="searchBox" placeholder="🔍 Search product...">
+          <div class="page-size-wrap">
+            Show <select id="pageSizeSelect">
+              <option value="10">10</option>
+              <option value="25" selected>25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select> rows
+          </div>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="salesTable">
+          <thead>
+            <tr>
+              <th>#ID</th><th>Product</th><th>Qty</th>
+              <th>Price (₹)</th><th>Revenue (₹)</th><th>Date</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody">
+            {% for row in sales %}
+            <tr data-product="{{ row.product | lower }}">
+              <td><span class="id-badge">{{ row.id }}</span></td>
+              <td><strong class="product-name">{{ row.product }}</strong></td>
+              <td>{{ row.quantity }}</td>
+              <td>₹{{ "{:,.0f}".format(row.price) }}</td>
+              <td class="rev-cell">₹{{ "{:,.0f}".format(row.quantity * row.price) }}</td>
+              <td><span class="date-chip">{{ row.date }}</span></td>
+              <td class="action-cell">
+                <a href="/edit/{{ row.id }}" class="btn-edit">✏ Edit</a>
+                <form action="/delete/{{ row.id }}" method="POST" style="display:inline"
+                      onsubmit="return confirm('Delete this record?')">
+                  <button type="submit" class="btn-delete">🗑</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="pagination" id="pagination"></div>
+    </section>
+
+  </div><!-- /page-records -->
+
+  <!-- ── PAGE: ADD SALE ─────────────────────────────────────── -->
+  <div class="page fade-in" id="page-add">
+
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <button class="hamburger" onclick="toggleSidebar()">
+          <span></span><span></span><span></span>
+        </button>
+        <div class="page-title">
+          <h1>Add Sale</h1>
+          <span class="page-sub">Create a new sales record or import CSV</span>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <button class="topbar-theme-btn" onclick="toggleTheme()">🌙 Dark</button>
+      </div>
+    </header>
+
+    <section class="forms-row" style="padding-top:20px;">
+      <div class="form-card">
+        <div class="form-card-header"><h3>➕ Add New Sale</h3></div>
+        <form action="/add" method="POST" class="sale-form">
+          <div class="form-group">
+            <label>Product Name</label>
+            <input type="text" name="product" placeholder="e.g. Laptop" required>
+          </div>
+          <div class="form-row-2">
+            <div class="form-group">
+              <label>Quantity</label>
+              <input type="number" name="quantity" placeholder="1" min="1" required>
+            </div>
+            <div class="form-group">
+              <label>Price (₹)</label>
+              <input type="number" name="price" placeholder="0.00" min="0" step="0.01" required>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Date</label>
+            <input type="date" name="date" value="{{ today_str }}">
+          </div>
+          <button type="submit" class="btn-primary">Add Sale</button>
+        </form>
+      </div>
+
+      <div class="form-card">
+        <div class="form-card-header">
+          <h3>📂 Import CSV</h3>
+          <a href="/export_csv" class="btn-export">↓ Export CSV</a>
+        </div>
+        <p class="import-note">Required columns: <code>Product, Quantity, Price, Date</code></p>
+        <form action="/import_csv" method="POST" enctype="multipart/form-data" class="sale-form">
+          <div class="form-group">
+            <label>Choose File</label>
+            <input type="file" name="csv_file" accept=".csv" required>
+          </div>
+          <button type="submit" class="btn-secondary">Import CSV</button>
+        </form>
+        <div class="csv-sample">
+          <p style="font-size:11px;color:var(--text3);margin-bottom:6px;">Sample format:</p>
+          <pre>Product,Quantity,Price,Date
+Laptop,2,50000,2026-01-15
+Phone,3,20000,2026-01-20</pre>
+        </div>
+      </div>
+    </section>
+
+  </div><!-- /page-add -->
+
+</main>
+
+<!-- ══ DATA VARIABLES ════════════════════════════════════════ -->
+<script>
+const CHART_LABELS     = {{ chart_labels | safe }};
+const CHART_QTY        = {{ chart_qty | safe }};
+const CHART_REVENUE    = {{ chart_revenue | safe }};
+const MONTHLY_LABELS   = {{ monthly_labels | safe }};
+const MONTHLY_VALUES   = {{ monthly_values | safe }};
+const ALL_FC_LABELS    = {{ all_fc_labels | safe }};
+const HIST_SERIES      = {{ hist_series | safe }};
+const LR_SERIES        = {{ lr_series | safe }};
+const MA_SERIES        = {{ ma_series | safe }};
+const LR_TOOLTIPS      = {{ lr_tooltips | safe }};
+const MA_TOOLTIPS      = {{ ma_tooltips | safe }};
+const PERIOD_TODAY     = {{ period_today | safe }};
+const PERIOD_YESTERDAY = {{ period_yesterday | safe }};
+const PERIOD_WEEK      = {{ period_week | safe }};
+const PERIOD_MONTH     = {{ period_month | safe }};
+const PERIOD_ALL       = {{ period_all | safe }};
+</script>
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

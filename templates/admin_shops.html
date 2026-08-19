@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Manage Shops — ShopSight</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script>
+    (function() {
+      const t = localStorage.getItem('xyz-theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+</head>
+<body>
+
+{% set active_page = 'shops' %}
+{% include '_admin_sidebar.html' %}
+
+<main class="main-content">
+  <header class="topbar">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <button class="hamburger" onclick="toggleSidebar()"><span></span><span></span><span></span></button>
+      <div class="page-title">
+        <h1>Manage Shops</h1>
+        <span class="page-sub">Edit shop/owner info, deactivate accounts that violate terms, or reset a login</span>
+      </div>
+    </div>
+    <div class="topbar-right" style="display:flex;align-items:center;gap:14px;">
+      <button class="topbar-theme-btn" id="themeBtn" onclick="toggleTheme()">🌙 Dark</button>
+      <span style="font-size:12px;color:var(--text2);">Signed in as <strong>{{ username }}</strong></span>
+    </div>
+  </header>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, msg in messages %}
+      <div class="admin-flash {{ category }}">{{ '✓' if category == 'success' else '⚠' }} {{ msg }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  <section class="table-section" style="padding-top:24px;">
+    <form method="GET" action="/admin/shops" class="shop-search-toolbar">
+      <input type="text" name="q" placeholder="🔍 Search shop, owner, email or username…" value="{{ q }}">
+      <select name="status" onchange="this.form.submit()">
+        <option value=""        {{ 'selected' if status == '' }}>All statuses</option>
+        <option value="active"   {{ 'selected' if status == 'active' }}>Active only</option>
+        <option value="inactive" {{ 'selected' if status == 'inactive' }}>Deactivated only</option>
+      </select>
+      <button type="submit" class="btn-secondary" style="width:auto;padding:9px 16px;">Search</button>
+      {% if q or status %}
+      <a href="/admin/shops" class="btn-export" style="border-color:rgba(248,113,113,.3);color:var(--red);">✕ Clear</a>
+      {% endif %}
+      <span class="record-count">{{ shops|length }} shop{{ 's' if shops|length != 1 }}</span>
+    </form>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Shop</th>
+            <th>Owner</th>
+            <th>Contact</th>
+            <th>Status</th>
+            <th>Registered</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in shops %}
+          <tr>
+            <td class="product-name">{{ s.name }}</td>
+            <td>
+              <div class="owner-cell">
+                <span class="owner-name">{{ s.full_name or '—' }}</span>
+                <span class="owner-username">@{{ s.owner_username }}</span>
+              </div>
+            </td>
+            <td>
+              <div class="owner-cell">
+                <span>{{ s.email or '—' }}</span>
+                <span class="owner-username">{{ s.phone or '' }}</span>
+              </div>
+            </td>
+            <td><span class="status-pill {{ 'active' if s.is_active else 'inactive' }}">{{ 'Active' if s.is_active else 'Deactivated' }}</span></td>
+            <td><span class="date-chip">{{ s.created_at.strftime('%d %b %Y') if s.created_at else '—' }}</span></td>
+            <td>
+              <div class="action-cell">
+                <button class="btn-edit" onclick='openEditModal({{ {"id": s.id, "name": s.name, "full_name": s.full_name, "email": s.email, "phone": s.phone}|tojson }})'>Edit</button>
+                <form action="/admin/shops/{{ s.id }}/toggle-active" method="POST" style="display:inline;"
+                      onsubmit="return confirm('{{ 'Deactivate' if s.is_active else 'Reactivate' }} \'{{ s.name }}\'? {{ 'The owner will lose login access immediately.' if s.is_active else 'The owner will regain login access.' }}');">
+                  {% if s.is_active %}
+                  <button type="submit" class="btn-delete">Deactivate</button>
+                  {% else %}
+                  <button type="submit" class="btn-edit" style="background:rgba(34,211,160,.12);color:var(--green);border-color:rgba(34,211,160,.3);">Reactivate</button>
+                  {% endif %}
+                </form>
+                <form action="/admin/shops/{{ s.id }}/reset-password" method="POST" style="display:inline;"
+                      onsubmit="return confirm('Reset the login password for \'{{ s.owner_username }}\'? A new temporary password will be generated and shown once.');">
+                  <button type="submit" class="btn-edit" style="background:rgba(167,139,250,.12);color:var(--purple);border-color:rgba(167,139,250,.3);">Reset Password</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6" style="text-align:center;color:var(--text3);padding:24px;">No shops match your search.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<!-- ══ EDIT SHOP MODAL ══════════════════════════════════════ -->
+<div class="modal-overlay" id="editModal">
+  <div class="profile-modal" style="max-width:440px;position:relative;">
+    <button class="profile-close" onclick="closeEditModal()">✕</button>
+    <div class="form-card-header" style="padding:20px 24px 0;"><h3>Edit Shop</h3></div>
+    <form id="editForm" method="POST" class="sale-form" style="padding:16px 24px 24px;">
+      <div class="form-group">
+        <label>Shop / Business Name</label>
+        <input type="text" name="shop_name" id="editShopName" required>
+      </div>
+      <div class="form-group">
+        <label>Owner Full Name</label>
+        <input type="text" name="full_name" id="editFullName" required>
+      </div>
+      <div class="form-group">
+        <label>Owner Email</label>
+        <input type="text" name="email" id="editEmail">
+      </div>
+      <div class="form-group">
+        <label>Owner Phone</label>
+        <input type="text" name="phone" id="editPhone">
+      </div>
+      <div class="form-row-2">
+        <button type="submit" class="btn-primary">Save Changes</button>
+        <button type="button" class="btn-secondary" onclick="closeEditModal()">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function openEditModal(shop) {
+  document.getElementById('editForm').action = '/admin/shops/' + shop.id + '/update';
+  document.getElementById('editShopName').value = shop.name || '';
+  document.getElementById('editFullName').value = shop.full_name || '';
+  document.getElementById('editEmail').value = shop.email || '';
+  document.getElementById('editPhone').value = shop.phone || '';
+  document.getElementById('editModal').classList.add('open');
+}
+function closeEditModal() {
+  document.getElementById('editModal').classList.remove('open');
+}
+document.getElementById('editModal').addEventListener('click', function(e) {
+  if (e.target === this) closeEditModal();
+});
+
+let isDark = localStorage.getItem('xyz-theme') !== 'light';
+function applyTheme(dark) {
+  isDark = dark;
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  localStorage.setItem('xyz-theme', dark ? 'dark' : 'light');
+  const btn = document.getElementById('themeBtn');
+  if (btn) btn.textContent = dark ? '🌙 Dark' : '☀ Light';
+}
+function toggleTheme() { applyTheme(!isDark); }
+applyTheme(isDark);
+
+function updateClock() {
+  const t = new Date().toLocaleString('en-IN', { hour:'2-digit', minute:'2-digit', second:'2-digit', day:'2-digit', month:'short', year:'numeric' });
+  const el = document.getElementById('live-time-side');
+  if (el) el.textContent = t;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebarOverlay').classList.toggle('visible');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebarOverlay').classList.remove('visible');
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Platform Admin — ShopSight</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script>
+    (function() {
+      const t = localStorage.getItem('xyz-theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+    })();
+  </script>
+</head>
+<body>
+
+{% set active_page = 'dashboard' %}
+{% include '_admin_sidebar.html' %}
+
+<main class="main-content">
+  <header class="topbar">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <button class="hamburger" onclick="toggleSidebar()"><span></span><span></span><span></span></button>
+      <div class="page-title">
+        <h1>Platform Dashboard</h1>
+        <span class="page-sub">Registered shops overview — contact info only, no sales data</span>
+      </div>
+    </div>
+    <div class="topbar-right" style="display:flex;align-items:center;gap:14px;">
+      <button class="topbar-theme-btn" id="themeBtn" onclick="toggleTheme()">🌙 Dark</button>
+      <span style="font-size:12px;color:var(--text2);">Signed in as <strong>{{ username }}</strong></span>
+    </div>
+  </header>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, msg in messages %}
+      <div class="admin-flash {{ category }}">{{ '✓' if category == 'success' else '⚠' }} {{ msg }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  <section style="padding:28px 32px;">
+    <div class="filter-active-info" style="margin-bottom:20px;">
+      ℹ A superadmin manages who is registered and whether their account is in good
+      standing — never any shop's sales figures. See the README for the access-model notes.
+    </div>
+
+    <div class="kpi-grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));padding:0 0 24px;">
+      <div class="kpi-card kpi-blue">
+        <div class="kpi-label">Registered Shops</div>
+        <div class="kpi-value">{{ shop_count }}</div>
+      </div>
+      <div class="kpi-card kpi-green">
+        <div class="kpi-label">Active</div>
+        <div class="kpi-value">{{ active_count }}</div>
+      </div>
+      <div class="kpi-card kpi-orange">
+        <div class="kpi-label">Deactivated</div>
+        <div class="kpi-value">{{ deactivated_count }}</div>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <div class="chart-header">
+        <h3>Recently Registered</h3>
+        <a href="/admin/shops" class="btn-export" style="border-color:rgba(79,142,247,.3);color:var(--blue);">Manage all shops →</a>
+      </div>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Shop Name</th>
+              <th>Owner</th>
+              <th>Email</th>
+              <th>Status</th>
+              <th>Registered</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in recent_shops %}
+            <tr>
+              <td>{{ s.name }}</td>
+              <td>{{ s.full_name or s.owner_username }}</td>
+              <td>{{ s.email or '—' }}</td>
+              <td><span class="status-pill {{ 'active' if s.is_active else 'inactive' }}">{{ 'Active' if s.is_active else 'Deactivated' }}</span></td>
+              <td>{{ s.created_at.strftime('%d %b %Y') if s.created_at else '—' }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5" style="text-align:center;color:var(--text3);padding:20px;">No shops registered yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+let isDark = localStorage.getItem('xyz-theme') !== 'light';
+function applyTheme(dark) {
+  isDark = dark;
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  localStorage.setItem('xyz-theme', dark ? 'dark' : 'light');
+  const btn = document.getElementById('themeBtn');
+  if (btn) btn.textContent = dark ? '🌙 Dark' : '☀ Light';
+}
+function toggleTheme() { applyTheme(!isDark); }
+applyTheme(isDark);
+
+function updateClock() {
+  const t = new Date().toLocaleString('en-IN', { hour:'2-digit', minute:'2-digit', second:'2-digit', day:'2-digit', month:'short', year:'numeric' });
+  const el = document.getElementById('live-time-side');
+  if (el) el.textContent = t;
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+  document.getElementById('sidebarOverlay').classList.toggle('visible');
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebarOverlay').classList.remove('visible');
+}
+</script>
+</body>
+</html>

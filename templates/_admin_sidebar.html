@@ -1,0 +1,50 @@
+<!-- ══ SUPERADMIN SIDEBAR ══════════════════════════════════════
+     Include from a parent template using Jinja's include tag.
+     Set `active_page` in the parent template to one of:
+     'dashboard' or 'shops'  before including, to highlight the right item. -->
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-mark">SS</div>
+    <div class="logo-text">
+      <span class="logo-title">ShopSight</span>
+      <span class="logo-sub">Platform Admin</span>
+    </div>
+  </div>
+
+  <nav class="sidebar-nav">
+    <a href="/admin" class="nav-item {{ 'active' if active_page == 'dashboard' }}">
+      <span class="nav-icon">▦</span>Dashboard
+    </a>
+    <a href="/admin/shops" class="nav-item {{ 'active' if active_page == 'shops' }}">
+      <span class="nav-icon">🏬</span>Manage Shops
+    </a>
+    <span class="nav-item soon" title="Coming soon">
+      <span class="nav-icon">🚩</span>Violations<span class="nav-soon-tag">Soon</span>
+    </span>
+    <span class="nav-item soon" title="Coming soon">
+      <span class="nav-icon">📈</span>Platform Analytics<span class="nav-soon-tag">Soon</span>
+    </span>
+    <span class="nav-item soon" title="Coming soon">
+      <span class="nav-icon">📝</span>Audit Logs<span class="nav-soon-tag">Soon</span>
+    </span>
+    <span class="nav-item soon" title="Coming soon">
+      <span class="nav-icon">📢</span>Announcements<span class="nav-soon-tag">Soon</span>
+    </span>
+    <span class="nav-item soon" title="Coming soon">
+      <span class="nav-icon">⚙</span>Platform Settings<span class="nav-soon-tag">Soon</span>
+    </span>
+  </nav>
+
+  <nav class="sidebar-nav" style="flex:0;">
+    <a href="/logout" class="nav-item logout-link">
+      <span class="nav-icon">⎋</span>Logout
+    </a>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="live-dot"></div>
+    <span id="live-time-side"></span>
+  </div>
+</aside>
