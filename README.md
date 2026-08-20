@@ -1,126 +1,156 @@
 # ShopSight
 
-A multi-tenant sales analytics dashboard with ML-based revenue forecasting
-(linear regression + moving-average), built with Flask, MySQL, and Chart.js.
+> A multi-shop sales management and analytics platform built with Flask, MySQL, Python, HTML, CSS, and JavaScript.
 
-## Features
-- **Multi-tenant accounts** — any shop can self-register and gets an isolated
-  dashboard; no shop can see another shop's data.
-- **Real authentication** — passwords are salted and hashed with
-  Werkzeug's `pbkdf2:sha256`, never stored in plaintext.
-- **Sales CRUD** — add, edit, delete, filter by product/date/month, CSV
-  import/export.
-- **ML forecasting** — 6-month revenue forecast via linear regression and a
-  moving-average baseline, with a model-accuracy (R²) readout.
-- **Light/dark theme**, responsive layout.
+ShopSight lets multiple independent shops manage their own sales data — entered manually or imported via CSV — and see analytics and an ML-based revenue forecast for their business only. A platform Superadmin manages *which shops are registered*, with no access to any shop's sales figures.
 
-## Local setup
+---
+
+## 📌 Project Overview
+
+### Main goals
+- Let shop owners self-register and manage their own shop.
+- Enter sales manually or import them via CSV; export via CSV.
+- Analyze shop-specific sales data with filters and charts.
+- Forecast future revenue with an ML model trained on each shop's own history.
+- Keep every shop's data strictly isolated from every other shop.
+- Give a platform Superadmin the ability to manage shop *accounts* without ever seeing shop *data*.
+
+---
+
+## 👥 User Roles
+
+ShopSight has two roles.
+
+### 👑 Superadmin
+Manages the platform itself, not any shop's sales. Created once via a command-line script — there is no public sign-up for this role.
+
+**Can:**
+- View a directory of all registered shops (name, owner, email, phone, signup date, active/suspended status).
+- See aggregate counts (total shops, active shops).
+- Suspend a shop (blocks that shop's login without touching their data) and reactivate it later.
+- Permanently delete a shop (removes the owner's login and every sales row for that shop).
+- Reset a shop owner's password, generating a one-time temporary password.
+
+**Cannot:**
+- View any shop's individual sales rows, totals, or charts.
+- Reach a sales route at all — `/`, `/add`, `/edit`, `/delete`, `/import_csv`, `/export_csv` all redirect a Superadmin to `/admin`, even if the URL is typed directly.
+
+This separation is enforced with a `@shop_scoped` / `@superadmin_only` decorator pair at the Flask route level — it is not a hidden UI link that a curious user could still reach by guessing a URL.
+
+### 🏪 Shop Owner
+Manages their own shop's data only.
+
+**Can:**
+- Add, edit, and delete their own sales records.
+- Import sales via CSV, export their sales to CSV.
+- View KPIs and charts filtered by product, date range, or month, with quick period tabs (today / yesterday / past 7 days / this month / all time).
+- View a 6-month revenue forecast with a model-accuracy (R²) readout.
+- Edit their own profile (name, email, department, phone, location).
+
+**Cannot:**
+- See or reach another shop's data — every query is scoped by `shop_id`, and edit/delete additionally verify the row belongs to that shop before touching it (so one shop can't edit another's sale just by guessing its ID in a URL).
+
+---
+
+## ✨ Features
+
+### Authentication & security
+- Passwords hashed with Werkzeug's `pbkdf2:sha256` — never stored in plaintext.
+- Password policy enforced client- and server-side: 8+ characters, one uppercase, one lowercase, one number, one special character.
+- Secrets (`SECRET_KEY`, DB credentials) come from environment variables / `.env`, never hardcoded in source.
+- Per-user profile fields (name, email, department, phone, location) are stored server-side, scoped to that user's own row.
+
+### Sales management
+- Full CRUD on sales records, scoped to the logged-in shop.
+- Filter by product, date range, or month.
+- CSV import and export.
+
+### Analytics
+- Revenue and units-sold breakdown by product, with All / Month / Week / Today period tabs.
+- KPI cards: total revenue, units sold, this month's revenue, top product, today/yesterday/week/month comparisons, month-over-month growth.
+
+### ML forecasting
+- 6-month revenue forecast from two models shown side by side: a regression fit on a time trend **plus** a cyclical sin/cos encoding of month-of-year (so it can represent seasonal patterns, not just a straight-line trend), and a 3-month moving-average baseline.
+- Model accuracy (R²) is surfaced directly in the UI.
+- `generate_synthetic_data.py` can seed a shop with realistic multi-year sales history (growth trend, festive-season spike, monsoon dip, weekend bump) so the forecast has enough signal to be meaningful on a fresh account.
+
+### Superadmin dashboard
+- Shop directory with registered/active counts.
+- Suspend / reactivate / delete a shop.
+- Generate a temporary password for a shop owner.
+- No sales data anywhere on this page, by design.
+
+### UI
+- Light/dark theme toggle with corrected contrast in light mode.
+- Charts sized to a fixed-height container so browser zoom doesn't cause runaway canvas growth.
+- Self-registration form scrolls correctly on small screens.
+
+---
+
+## 🗂 Project Structure
+```
+app.py                     Flask app — routes, auth, ML forecasting logic
+setup_db.sql                Database schema (shops, users, sales)
+generate_synthetic_data.py Seeds realistic sales history for a shop
+create_superadmin.py       One-time script to create a platform-owner login
+requirements.txt
+Procfile                   For gunicorn-based deployment (Render/Railway)
+.env.example                Template for required environment variables
+templates/
+  index.html                Shop dashboard (KPIs, charts, ML forecast, records)
+  login.html
+  register.html              Shop self-registration
+  edit.html                   Edit a single sale
+  admin.html                  Superadmin shop directory
+static/
+  style.css
+  script.js
+```
+
+## 🗃 Data Model
+- **shops** — `id`, `name`, `slug`, `is_active`, `created_at`.
+- **users** — `id`, `shop_id` (NULL for a Superadmin), `username` (globally unique), `password_hash`, `role` (`owner` | `superadmin`), `full_name`, `email`, `department`, `phone`, `location`, `created_at`.
+- **sales** — `id`, `shop_id`, `product`, `quantity`, `price`, `date`.
+
+Every sales query filters on `shop_id`, sourced from the session, never from a request parameter.
+
+---
+
+## 🚀 Local Setup
 ```bash
 python -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-cp .env.example .env            # then edit .env with your local DB credentials
+cp .env.example .env            # fill in your local DB credentials
 mysql -u root -p < setup_db.sql
 
 python app.py                   # http://localhost:5000
 ```
-Go to `/register` to create your first shop and login — there are no more
-hardcoded demo accounts.
+Go to `/register` to create your first shop and login.
 
-### Seed realistic sales history (for the ML model)
-A brand-new shop has zero sales rows, so the forecast has nothing to learn
-from. Seed 24 months of realistic, seasonal synthetic data:
+**Seed sales history** (a new shop starts with zero sales, so there's nothing for the forecast to learn from):
 ```bash
 python generate_synthetic_data.py --username <your_login_username> --months 24
 ```
-This isn't random noise — it models a monthly growth trend per product,
-an Oct-Dec festive-season spike, a monsoon-month dip, and a weekend bump,
-so the linear regression actually has a trend + seasonality to fit.
 
-## Platform-owner (superadmin) access
-There's a separate role for whoever owns the platform itself — you, not any
-individual shop. It's created once via a script, not through public sign-up:
+**Create your Superadmin login** (one time, not through the public site):
 ```bash
 python create_superadmin.py --username youradmin --password "Str0ng!Pass1"
 ```
-Logging in as that account lands on `/admin` — a directory of registered
-shops (name, owner, email, phone, signup date). It has **no route into any
-shop's sales data**: every sales route in `app.py` is wrapped in a
-`@shop_scoped` decorator that hard-redirects a superadmin away, even if they
-type the URL directly. This is real, enforced access control, not just a
-hidden nav link.
+Log in with that account and you'll land on `/admin`.
 
-**A note on "encrypted so we can't access it":** what's built here is
-*application-level access control* — the Flask app itself refuses to serve
-sales data to a superadmin. That's the right amount of protection for a
-project like this and it's what most SaaS platforms actually do. It does
-**not** stop someone with direct MySQL access (e.g. via phpMyAdmin) from
-reading the `sales` table — that would require encrypting each shop's sales
-values at the database layer with a key the platform owner doesn't hold,
-which is a much bigger, genuinely hard problem (key management, and every
-query needs the shop's own key to decrypt). Worth knowing the difference if
-this comes up in an interview, but not worth building unless you have a
-specific reason to need it.
+---
 
-## How the multi-tenancy works
-- `shops` — one row per business.
-- `users` — belongs to one shop; `username` is globally unique (acts like
-  a login handle). Password is hashed, never plaintext.
-- `sales` — every row carries a `shop_id`. Every query in `app.py` filters
-  by `session['shop_id']`, and edit/delete routes also check the row's
-  `shop_id` matches the session before touching it — so one shop can't
-  edit or delete another shop's data just by guessing a URL.
+## ☁️ Deployment
+This app runs comfortably on free tiers as of 2026:
+- **App hosting** — Render (auto-detects `requirements.txt` and the `Procfile`, free HTTPS URL) or Railway.
+- **Database** — free managed MySQL is harder to find than it used to be (Heroku and PlanetScale both dropped their free tiers). Railway's trial credit or Aiven's free MySQL tier both work for a portfolio-scale project; `db4free.net` is a slower but simple option for a demo link.
+- Set `SECRET_KEY`, `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` as environment variables on your host — never commit `.env`.
+- Leave `FLASK_DEBUG` unset (or `0`) in production.
 
-## The ML model
-Two forecasts run side by side, both surfaced in the UI with an R² accuracy readout:
-- **Regression (trend + seasonality)** — not a plain single-feature linear
-  regression on a time index (that structurally cannot represent a
-  festive-season spike or a monsoon dip, no matter how much data you feed
-  it). It fits on a time trend *plus* a cyclical sin/cos encoding of
-  month-of-year, so it can actually learn seasonal shape. On synthetic
-  data with a real seasonal pattern, this took R² from ~0% to ~59% in
-  testing — worth mentioning if this comes up in an interview, since "I
-  added more data" and "I fixed the model" are different claims and this
-  project can back up the second one.
-- **Moving average (3-month window)** — a simple baseline for comparison.
+---
 
-Further improvements if you get real multi-year data:
-- Add holiday/promotion flags as explicit features.
-- Try `Prophet` or a seasonal ARIMA, which handle this natively instead of
-  hand-rolled Fourier features.
-- If you get a dataset from Kaggle, look for **2+ years of history** and a
-  schema close to yours (product, quantity, price/revenue, date) — a
-  categorically different dataset (e.g. Walmart weekly sales) needs column
-  mapping before it's useful here.
-
-## Deployment (resume-ready, free tier)
-This app is small enough to run comfortably on free tiers. As of 2026:
-
-- **App hosting — Render** is the easiest free option: connect your GitHub
-  repo, it auto-detects `requirements.txt` and the `Procfile`
-  (`web: gunicorn app:app`), and gives you a free HTTPS URL. Railway is a
-  solid alternative with a similar workflow.
-- **Database** — free *managed MySQL* has gotten harder to find (Heroku and
-  PlanetScale both dropped their free tiers). Practical options:
-  - Railway's free trial credit covers a small MySQL instance for a
-    portfolio-scale project.
-  - Aiven has a free MySQL tier suitable for low-traffic demos.
-  - If you just need something to point at for a resume demo, `db4free.net`
-    works too but is slow — fine for a live demo link, not for real load.
-- Set `SECRET_KEY`, `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` as
-  environment variables in your host's dashboard (never commit `.env`).
-- Set `FLASK_DEBUG=0` (or leave unset) in production — debug mode leaks
-  a Python console to anyone who can trigger a 500 error.
-
-Since exact free-tier terms shift often, check current pricing pages
-before committing to one.
-
-## For your resume
-Worth calling out explicitly, since interviewers will ask about these:
-- Multi-tenant data isolation (shop-scoped queries + ownership checks on
-  every mutation, not just reads)
-- Hashed credentials, env-based secrets management
-- ML forecasting pipeline (feature construction → model → 6-month
-  projection with an accuracy metric surfaced in the UI)
-- CSV import/export, filterable analytics, responsive dark/light UI
+## 🎓 Tech Stack
+Flask · MySQL · scikit-learn · NumPy · Werkzeug · Chart.js · python-dotenv · Gunicorn
