@@ -62,6 +62,29 @@ def superadmin_only(view):
 PASSWORD_RULE = re.compile(r'^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$')
 PASSWORD_HELP = 'Password needs 8+ characters, one uppercase, one lowercase, one number, and one special character.'
 
+# ── Account recovery — security question, no email/SMS provider wired up ─────
+# A fixed list (rather than a free-text question) keeps answers a bit more
+# predictable to hash/compare and avoids someone typing something unusable
+# as their own "question". The answer is hashed with the same pbkdf2:sha256
+# scheme as the password — ShopSight never stores it in plaintext, which
+# also means it can never be shown back to anyone, including a superadmin.
+SECURITY_QUESTIONS = [
+    "What was your first pet's name?",
+    "What is your mother's maiden name?",
+    "What city were you born in?",
+    "What was the name of your first school?",
+    "What is your favorite book?",
+]
+
+def normalize_or_none(value):
+    """Blank/whitespace-only form input becomes NULL rather than ''."""
+    v = (value or '').strip()
+    return v or None
+
+def normalize_answer(answer):
+    """Case/whitespace-insensitive so 'Fluffy' and 'fluffy ' both match."""
+    return (answer or '').strip().lower()
+
 # ── Decimal / Date JSON fix ───────────────────────────────────────────────────
 class SafeEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -73,6 +96,7 @@ def jdump(obj): return json.dumps(obj, cls=SafeEncoder)
 def slugify(name):
     s = re.sub(r'[^a-z0-9]+', '-', name.strip().lower()).strip('-')
     return s or 'shop'
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  ML ENGINE  (unchanged logic — linear regression + moving-average forecast)
@@ -139,16 +163,24 @@ def run_ml_forecast(monthly_labels, monthly_values, n_ahead=6):
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     error = None
+    form_values = {}
     if request.method == 'POST':
         shop_name = request.form.get('shop_name', '').strip()
         full_name = request.form.get('full_name', '').strip()
         email     = request.form.get('email', '').strip()
+        phone     = normalize_or_none(request.form.get('phone', ''))
         username  = request.form.get('username', '').strip()
         password  = request.form.get('password', '')
         confirm   = request.form.get('confirm_password', '')
+        security_question = request.form.get('security_question', '')
+        security_answer   = request.form.get('security_answer', '').strip()
+        form_values = {'shop_name': shop_name, 'full_name': full_name, 'email': email,
+                        'phone': phone or '', 'username': username, 'security_question': security_question}
 
         if not shop_name or not username or not password or not full_name or not email:
             error = 'All fields are required.'
+        elif security_question not in SECURITY_QUESTIONS or not security_answer:
+            error = 'Please choose a recovery question and provide an answer — this is how you\'ll get back in if you forget your password.'
         elif not PASSWORD_RULE.match(password):
             error = PASSWORD_HELP
         elif password != confirm:
@@ -160,6 +192,15 @@ def register():
             if cur.fetchone():
                 error = 'That username is already taken. Please choose another.'
             else:
+                cur.execute("SELECT id FROM users WHERE LOWER(email)=LOWER(%s)", (email,))
+                if cur.fetchone():
+                    error = 'An account already exists with that email address.'
+                elif phone:
+                    cur.execute("SELECT id FROM users WHERE phone=%s", (phone,))
+                    if cur.fetchone():
+                        error = 'An account already exists with that phone number.'
+
+            if not error:
                 slug = slugify(shop_name)
                 # ensure slug uniqueness
                 cur.execute("SELECT id FROM shops WHERE slug=%s", (slug,))
@@ -169,9 +210,11 @@ def register():
                 cur.execute("INSERT INTO shops (name, slug) VALUES (%s,%s)", (shop_name, slug))
                 shop_id = cur.lastrowid
                 cur.execute(
-                    """INSERT INTO users (shop_id, username, password_hash, role, full_name, email)
-                       VALUES (%s,%s,%s,%s,%s,%s)""",
-                    (shop_id, username, generate_password_hash(password), 'owner', full_name, email))
+                    """INSERT INTO users (shop_id, username, password_hash, role, full_name, email, phone,
+                                           security_question, security_answer_hash)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (shop_id, username, generate_password_hash(password), 'owner', full_name, email, phone,
+                     security_question, generate_password_hash(normalize_answer(security_answer))))
                 db.commit()
                 user_id = cur.lastrowid
                 db.close()
@@ -183,7 +226,8 @@ def register():
                 session['role']      = 'owner'
                 return redirect('/')
             db.close()
-    return render_template('register.html', error=error)
+    return render_template('register.html', error=error, security_questions=SECURITY_QUESTIONS,
+                            form_values=form_values)
 
 MAX_FAILED_ATTEMPTS = 5
 LOCKOUT_MINUTES     = 15
@@ -234,6 +278,91 @@ def login():
         db.close()
     return render_template('login.html', error=error)
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  FORGOT PASSWORD — security-question recovery (no email/SMS provider wired up).
+#  A short server-side, session-scoped 3-step flow: confirm identity by
+#  username → answer the security question on file → set a new password.
+#  Session keys are cleared the moment the flow ends, succeeds, or hits the
+#  attempt limit, so a stale half-finished flow can't be resumed later.
+# ══════════════════════════════════════════════════════════════════════════════
+FP_MAX_ATTEMPTS = 5
+
+def _fp_clear():
+    for k in ('fp_user_id', 'fp_attempts'):
+        session.pop(k, None)
+
+@app.route('/forgot-password')
+def forgot_password():
+    _fp_clear()
+    return render_template('forgot_password.html', step='username')
+
+@app.route('/forgot-password/find', methods=['POST'])
+def forgot_password_find():
+    username = request.form.get('username', '').strip()
+    db = get_db(); cur = db.cursor(dictionary=True)
+    cur.execute("SELECT id, security_question FROM users WHERE username=%s", (username,))
+    user = cur.fetchone()
+    db.close()
+
+    if not user or not user['security_question']:
+        return render_template('forgot_password.html', step='username',
+            error="We couldn't find a recovery question set up for that username. "
+                  "Contact your platform admin to have your password reset instead.")
+
+    session['fp_user_id']  = user['id']
+    session['fp_attempts'] = 0
+    return render_template('forgot_password.html', step='question', question=user['security_question'])
+
+@app.route('/forgot-password/verify', methods=['POST'])
+def forgot_password_verify():
+    uid = session.get('fp_user_id')
+    if not uid:
+        return redirect('/forgot-password')
+
+    db = get_db(); cur = db.cursor(dictionary=True)
+    cur.execute("SELECT security_question, security_answer_hash FROM users WHERE id=%s", (uid,))
+    user = cur.fetchone()
+    db.close()
+    if not user:
+        _fp_clear()
+        return redirect('/forgot-password')
+
+    answer = normalize_answer(request.form.get('answer', ''))
+    if check_password_hash(user['security_answer_hash'], answer):
+        session['fp_verified'] = True
+        return render_template('forgot_password.html', step='reset')
+
+    session['fp_attempts'] = session.get('fp_attempts', 0) + 1
+    if session['fp_attempts'] >= FP_MAX_ATTEMPTS:
+        _fp_clear()
+        return render_template('forgot_password.html', step='username',
+            error='Too many incorrect answers. Please start over.')
+    return render_template('forgot_password.html', step='question',
+        question=user['security_question'], error="That answer doesn't match our records. Try again.")
+
+@app.route('/forgot-password/reset', methods=['POST'])
+def forgot_password_reset():
+    uid = session.get('fp_user_id')
+    if not uid or not session.get('fp_verified'):
+        return redirect('/forgot-password')
+
+    password = request.form.get('password', '')
+    confirm  = request.form.get('confirm_password', '')
+    if not PASSWORD_RULE.match(password):
+        return render_template('forgot_password.html', step='reset', error=PASSWORD_HELP)
+    if password != confirm:
+        return render_template('forgot_password.html', step='reset', error='Passwords do not match.')
+
+    db = get_db(); cur = db.cursor()
+    cur.execute("UPDATE users SET password_hash=%s, failed_attempts=0, locked_until=NULL WHERE id=%s",
+                (generate_password_hash(password), uid))
+    db.commit(); db.close()
+
+    session.pop('fp_verified', None)
+    _fp_clear()
+    flash('Password changed successfully. Please log in with your new password.', 'success')
+    return redirect('/login')
+
 @app.route('/logout')
 def logout():
     session.clear()
@@ -245,14 +374,78 @@ def update_profile():
     full_name  = request.form.get('full_name', '').strip()
     email      = request.form.get('email', '').strip()
     department = request.form.get('department', '').strip()
-    phone      = request.form.get('phone', '').strip()
+    phone      = normalize_or_none(request.form.get('phone', ''))
     location   = request.form.get('location', '').strip()
+    uid = session['user_id']
 
-    db = get_db(); c = db.cursor()
-    c.execute("""UPDATE users SET full_name=%s, email=%s, department=%s, phone=%s, location=%s
+    db = get_db(); c = db.cursor(dictionary=True)
+    if email:
+        c.execute("SELECT id FROM users WHERE LOWER(email)=LOWER(%s) AND id!=%s", (email, uid))
+        if c.fetchone():
+            db.close()
+            flash('Another account already uses that email address.', 'error')
+            return redirect('/')
+    if phone:
+        c.execute("SELECT id FROM users WHERE phone=%s AND id!=%s", (phone, uid))
+        if c.fetchone():
+            db.close()
+            flash('Another account already uses that phone number.', 'error')
+            return redirect('/')
+
+    c2 = db.cursor()
+    c2.execute("""UPDATE users SET full_name=%s, email=%s, department=%s, phone=%s, location=%s
                  WHERE id=%s""",
-              (full_name, email, department, phone, location, session['user_id']))
+              (full_name, email, department, phone, location, uid))
     db.commit(); db.close()
+    flash('Profile updated.', 'success')
+    return redirect('/')
+
+@app.route('/profile/change-password', methods=['POST'])
+def change_password():
+    if not logged_in(): return redirect('/login')
+    old_password = request.form.get('old_password', '')
+    new_password = request.form.get('new_password', '')
+    confirm      = request.form.get('confirm_new_password', '')
+
+    db = get_db(); cur = db.cursor(dictionary=True)
+    cur.execute("SELECT password_hash FROM users WHERE id=%s", (session['user_id'],))
+    user = cur.fetchone()
+
+    if not user or not check_password_hash(user['password_hash'], old_password):
+        db.close()
+        flash('Current password is incorrect.', 'error')
+        return redirect('/')
+    if not PASSWORD_RULE.match(new_password):
+        db.close()
+        flash(PASSWORD_HELP, 'error')
+        return redirect('/')
+    if new_password != confirm:
+        db.close()
+        flash('New passwords do not match.', 'error')
+        return redirect('/')
+
+    c2 = db.cursor()
+    c2.execute("UPDATE users SET password_hash=%s, failed_attempts=0, locked_until=NULL WHERE id=%s",
+               (generate_password_hash(new_password), session['user_id']))
+    db.commit(); db.close()
+    flash('Password updated.', 'success')
+    return redirect('/')
+
+@app.route('/profile/security-question', methods=['POST'])
+def update_security_question():
+    if not logged_in(): return redirect('/login')
+    question = request.form.get('security_question', '')
+    answer   = request.form.get('security_answer', '').strip()
+
+    if question not in SECURITY_QUESTIONS or not answer:
+        flash('Choose a question and provide an answer to update your recovery details.', 'error')
+        return redirect('/')
+
+    db = get_db(); cur = db.cursor()
+    cur.execute("UPDATE users SET security_question=%s, security_answer_hash=%s WHERE id=%s",
+                (question, generate_password_hash(normalize_answer(answer)), session['user_id']))
+    db.commit(); db.close()
+    flash('Recovery question updated.', 'success')
     return redirect('/')
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -269,7 +462,7 @@ def home():
     # Real per-user profile fields (previously — and incorrectly — stored in
     # browser localStorage under one shared key, so every login on the same
     # browser showed the same profile). Now scoped to this user's own row.
-    cursor.execute("""SELECT full_name, email, department, phone, location
+    cursor.execute("""SELECT full_name, email, department, phone, location, security_question
                        FROM users WHERE id=%s""", (session['user_id'],))
     profile = cursor.fetchone() or {}
     today        = datetime.today().date()
@@ -385,6 +578,7 @@ def home():
     return render_template("index.html",
         username=session['username'], shop_name=session['shop_name'], role=session['role'],
         profile=profile,
+        security_questions=SECURITY_QUESTIONS,
         sales=sales,
         all_products=all_products, all_months=all_months,
         f_product=f_product, f_date_from=f_date_from,

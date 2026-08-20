@@ -87,6 +87,15 @@
       outline:none; transition:border-color .2s, box-shadow .2s;
     }
     input:focus { border-color:var(--green); box-shadow:0 0 0 3px rgba(34,211,160,.12); }
+    select {
+      width:100%; background:var(--bg); border:1px solid var(--border);
+      border-radius:10px; color:var(--text); font-family:var(--body);
+      font-size:14px; padding:11px 13px 11px 40px;
+      outline:none; transition:border-color .2s, box-shadow .2s;
+      appearance:none; cursor:pointer;
+    }
+    select:focus { border-color:var(--green); box-shadow:0 0 0 3px rgba(34,211,160,.12); }
+    select:invalid { color: var(--text3); }
     .toggle-pw { position:absolute; right:13px; top:50%; transform:translateY(-50%); cursor:pointer; font-size:15px; color:var(--text3); user-select:none; }
     .hint-text { font-size:11px; color:var(--text3); margin-top:5px; }
 
@@ -149,7 +158,7 @@
           <div class="input-wrap">
             <span class="input-icon">🧑</span>
             <input type="text" name="full_name" placeholder="e.g. Shubham Raj"
-                   value="{{ request.form.get('full_name','') }}" required>
+                   value="{{ form_values.full_name if form_values else '' }}" required>
           </div>
         </div>
         <div class="form-group">
@@ -157,7 +166,15 @@
           <div class="input-wrap">
             <span class="input-icon">✉</span>
             <input type="text" name="email" placeholder="you@example.com"
-                   value="{{ request.form.get('email','') }}" required>
+                   value="{{ form_values.email if form_values else '' }}" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Phone <span style="text-transform:none;font-weight:400;color:var(--text3);">(optional)</span></label>
+          <div class="input-wrap">
+            <span class="input-icon">📱</span>
+            <input type="text" name="phone" placeholder="+91 00000 00000"
+                   value="{{ form_values.phone if form_values else '' }}">
           </div>
         </div>
         <div class="form-group">
@@ -165,8 +182,28 @@
           <div class="input-wrap">
             <span class="input-icon">👤</span>
             <input type="text" name="username" placeholder="Choose a login username"
-                   value="{{ request.form.get('username','') }}" required>
+                   value="{{ form_values.username if form_values else '' }}" required>
           </div>
+        </div>
+        <div class="form-group">
+          <label>Security Question</label>
+          <div class="input-wrap">
+            <span class="input-icon">🛡</span>
+            <select name="security_question" required>
+              <option value="" disabled {{ 'selected' if not (form_values and form_values.security_question) }}>Used to recover your account if you forget your password</option>
+              {% for q in security_questions %}
+              <option value="{{ q }}" {{ 'selected' if form_values and form_values.security_question == q }}>{{ q }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Security Answer</label>
+          <div class="input-wrap">
+            <span class="input-icon">🔑</span>
+            <input type="text" name="security_answer" placeholder="Your answer" required>
+          </div>
+          <span class="hint-text">Not case-sensitive. Remember this exactly — it's the only way back in if you forget your password.</span>
         </div>
         <div class="form-group">
           <label>Password</label>

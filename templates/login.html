@@ -186,6 +186,13 @@
       {% if error %}
       <div class="error-box">⚠ {{ error }}</div>
       {% endif %}
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, msg in messages %}
+        <div class="error-box" style="{{ 'background:rgba(34,211,160,.1);border-color:rgba(34,211,160,.3);color:var(--green);' if category == 'success' }}">
+          {{ '✓' if category == 'success' else '⚠' }} {{ msg }}
+        </div>
+        {% endfor %}
+      {% endwith %}
 
       <form method="POST" action="/login">
         <div class="form-group">
@@ -206,6 +213,10 @@
         </div>
         <button type="submit" class="btn-login">Sign In →</button>
       </form>
+
+      <div class="login-hint" style="text-align:center;">
+        <a href="/forgot-password" style="color:var(--text2);font-weight:600;text-decoration:none;font-size:12px;">Forgot your password?</a>
+      </div>
 
       <div class="login-hint" style="text-align:center;">
         New shop? <a href="/register" style="color:var(--blue);font-weight:600;text-decoration:none;">Create an account →</a>

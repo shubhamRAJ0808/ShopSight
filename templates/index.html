@@ -134,12 +134,65 @@
           <a href="/logout" class="btn-logout-profile">⏻ Logout</a>
         </div>
       </form>
+
+      <!-- Change password — requires the current password, never shown/prefilled -->
+      <div class="profile-section-title">Change Password</div>
+      <form method="POST" action="/profile/change-password">
+        <div class="profile-field">
+          <label>Current Password</label>
+          <input type="password" name="old_password" placeholder="Enter current password" required>
+        </div>
+        <div class="profile-field">
+          <label>New Password</label>
+          <input type="password" name="new_password" placeholder="At least 8 characters" required minlength="8"
+                 pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}"
+                 title="8+ characters, with uppercase, lowercase, a number, and a special character">
+        </div>
+        <div class="profile-field">
+          <label>Confirm New Password</label>
+          <input type="password" name="confirm_new_password" placeholder="Re-enter new password" required minlength="8">
+        </div>
+        <div class="profile-actions">
+          <button type="submit" class="btn-save-profile" style="background:var(--purple);">🔑 Update Password</button>
+        </div>
+      </form>
+
+      <!-- Recovery question — used by /forgot-password. Answer is never shown back,
+           even here, since only the hash is ever stored. -->
+      <div class="profile-section-title">Account Recovery</div>
+      <form method="POST" action="/profile/security-question">
+        <div class="profile-field">
+          <label>Security Question</label>
+          <select name="security_question" required
+                  style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:var(--body);font-size:13px;padding:9px 13px;width:100%;">
+            <option value="" disabled {{ 'selected' if not profile.security_question }}>Choose a question</option>
+            {% for q in security_questions %}
+            <option value="{{ q }}" {{ 'selected' if profile.security_question == q }}>{{ q }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="profile-field">
+          <label>Answer</label>
+          <input type="text" name="security_answer" placeholder="{{ 'Enter a new answer to update it' if profile.security_question else 'Set your answer' }}" required>
+        </div>
+        <div class="profile-actions">
+          <button type="submit" class="btn-save-profile" style="background:var(--surface3);color:var(--text);">🛡 {{ 'Update' if profile.security_question else 'Set' }} Recovery Question</button>
+        </div>
+      </form>
     </div>
   </div>
 </div>
 
 <!-- ══ MAIN ═════════════════════════════════════════════════ -->
 <main class="main-content">
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, msg in messages %}
+      <div class="admin-flash {{ category }}" style="margin-top:20px;">{{ '✓' if category == 'success' else '⚠' }} {{ msg }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
 
   <!-- ── PAGE: OVERVIEW ──────────────────────────────────── -->
   <div class="page active fade-in" id="page-overview">
